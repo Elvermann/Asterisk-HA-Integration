@@ -1,0 +1,10 @@
+; Ergänzung für /etc/asterisk/manager.conf
+; Vorhandene [general]-Einstellungen beibehalten.
+; Die Integration benötigt nur Ereignis-Leserechte, keine AMI-Schreibrechte.
+
+[ha_line_monitor]
+secret = HIER_DAS_BESTEHENDE_AMI_PASSWORT_EINTRAGEN
+deny = 0.0.0.0/0.0.0.0
+permit = HOME_ASSISTANT_LAN_IP/255.255.255.255
+read = system,call,dialplan
+write =
