@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Asterisk AMI verbinden",
+        "description": "Read-only Verbindung zum Asterisk Manager Interface.",
+        "data": {
+          "host": "Asterisk Host",
+          "port": "AMI Port",
+          "username": "AMI Benutzer",
+          "password": "AMI Passwort"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum AMI konnte nicht hergestellt werden.",
+      "invalid_auth": "AMI Anmeldung abgelehnt. Benutzername und Passwort prüfen."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Optionale Gesprächsinformationen",
+        "description": "Steuert die zusätzlichen Sensoren für Gesprächspartner und Gesprächsdauer. Beim Ausschalten werden diese Sensoren aus Home Assistant entfernt. Geräte-Status und Rufnummern-Leitungssensoren bleiben erhalten.",
+        "data": {
+          "show_call_details": "Gesprächspartner und Gesprächsdauer als Sensoren anzeigen"
+        }
+      }
+    }
+  }
+}
