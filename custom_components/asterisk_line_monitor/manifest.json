@@ -1,0 +1,11 @@
+{
+  "domain": "asterisk_line_monitor",
+  "name": "Asterisk Line Monitor",
+  "version": "1.2.1",
+  "documentation": "https://github.com/Elvermann/Asterisk-HA-Integration#readme",
+  "codeowners": ["@Elvermann"],
+  "config_flow": true,
+  "iot_class": "local_push",
+  "requirements": [],
+  "issue_tracker": "https://github.com/Elvermann/Asterisk-HA-Integration/issues"
+}
