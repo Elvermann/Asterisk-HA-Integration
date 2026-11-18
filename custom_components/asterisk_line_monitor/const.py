@@ -11,14 +11,8 @@ DEFAULT_SHOW_CALL_DETAILS = True
 
 PLATFORMS = ["binary_sensor", "sensor"]
 
-# The provider line sensor entity names are intentionally only the phone numbers.
-LINE_DEFINITIONS = {
-    "1820": {"endpoint": "epcan-3"},
-    "9092255": {"endpoint": "epcan-1"},
-    "9092256": {"endpoint": "epcan-2"},
-}
+# Inbound provider endpoint. Outbound lines are discovered from AMI registration details.
 INBOUND_ENDPOINT = "epcan-in"
-PROVIDER_ENDPOINTS = {item["endpoint"] for item in LINE_DEFINITIONS.values()}
 
 # Display names for the endpoints present in the current Asterisk configuration.
 KNOWN_CLIENTS = {
