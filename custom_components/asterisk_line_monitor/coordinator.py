@@ -147,6 +147,10 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._line_status_entity_adder = callback
         for number in existing_numbers or set():
             self._announce_line_status_entity(number)
+        # Every currently registered provider line gets its conversation sensor
+        # immediately, even if no call has ever been observed for that line.
+        for number in self.line_numbers:
+            self._announce_line_status_entity(number)
         for record in self._provider_channels.values():
             if record.get("line"):
                 self._announce_line_status_entity(record["line"])
@@ -237,7 +241,13 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Could not request outbound PJSIP registrations", exc_info=True)
 
     def _is_provider_endpoint(self, endpoint: str) -> bool:
-        return endpoint == INBOUND_ENDPOINT or endpoint.startswith("epcan-") or endpoint in self._provider_endpoint_to_number
+        normalized = endpoint.strip().lower()
+        return (
+            normalized == "epcan"
+            or normalized == INBOUND_ENDPOINT
+            or normalized.startswith("epcan-")
+            or endpoint in self._provider_endpoint_to_number
+        )
 
     def _line_from_channel(self, channel: str) -> tuple[str | None, str | None]:
         """Identify provider channels independently of registration-snapshot timing."""
@@ -265,6 +275,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._announce_line_status_entity(number)
         for number in self.line_numbers:
             self._announce_line_entity(number)
+            self._announce_line_status_entity(number)
 
     async def _handle_connection(self, connected: bool) -> None:
         self._connected = connected
