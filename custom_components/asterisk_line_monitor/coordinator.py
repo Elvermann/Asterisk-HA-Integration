@@ -568,6 +568,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             record["extension"] = extension
             if extension in self.line_numbers:
                 record["line"] = extension
+                self._announce_line_status_entity(extension)
             record["direction"] = "inbound"
 
     @staticmethod
