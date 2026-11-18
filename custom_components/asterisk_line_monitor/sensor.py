@@ -1,4 +1,4 @@
-"""Sensors for epcan lines, active calls and dynamically discovered PJSIP clients."""
+"""Sensors for provider lines, active calls and dynamically discovered PJSIP clients."""
 
 from __future__ import annotations
 
@@ -14,19 +14,35 @@ from .const import CONF_SHOW_CALL_DETAILS, DOMAIN, KNOWN_CLIENTS
 from .coordinator import AsteriskCoordinator
 
 
+def _line_device_info(entry: ConfigEntry, number: str) -> DeviceInfo:
+    """Return a dedicated Home Assistant device for one discovered provider line."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, f"{entry.entry_id}:line:{number}")},
+        name=number,
+        manufacturer="Asterisk",
+        model="epcan Providerleitung",
+    )
+
+
 def _client_entities(coordinator: AsteriskCoordinator, entry: ConfigEntry, endpoint: str) -> list[SensorEntity]:
     """Create the always-on status sensor and optional call-detail sensors."""
     entities: list[SensorEntity] = [AsteriskClientStatus(coordinator, entry, endpoint)]
     if entry.options.get(CONF_SHOW_CALL_DETAILS, True):
-        entities.extend([AsteriskClientCallPeer(coordinator, entry, endpoint), AsteriskClientCallDuration(coordinator, entry, endpoint)])
+        entities.extend([
+            AsteriskClientCallPeer(coordinator, entry, endpoint),
+            AsteriskClientCallDuration(coordinator, entry, endpoint),
+        ])
     return entities
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
-    """Set up fixed and dynamically discovered client sensors."""
+    """Set up fixed and dynamically discovered client and provider-line sensors."""
     coordinator: AsteriskCoordinator = hass.data[DOMAIN][entry.entry_id]
     added_clients: set[str] = set()
-    entities: list[SensorEntity] = [AsteriskActiveCalls(coordinator, entry), AsteriskPjsipRegistrations(coordinator, entry)]
+    entities: list[SensorEntity] = [
+        AsteriskActiveCalls(coordinator, entry),
+        AsteriskPjsipRegistrations(coordinator, entry),
+    ]
     for endpoint in coordinator.client_endpoints:
         entities.extend(_client_entities(coordinator, entry, endpoint))
         added_clients.add(endpoint)
@@ -42,18 +58,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     registry = er.async_get(hass)
     prefix = f"{entry.entry_id}_line_"
     restored = {
-        entity.unique_id[len(prefix):]
+        entity.unique_id[len(prefix):-len("_status")]
         for entity in registry.entities.values()
         if entity.config_entry_id == entry.entry_id
         and entity.domain == "sensor"
         and entity.unique_id.startswith(prefix)
         and entity.unique_id.endswith("_status")
     }
-    added_status: set[str] = set()
+    added_lines: set[str] = set()
 
     def add_line_status(number: str) -> None:
-        if number not in added_status:
-            added_status.add(number)
+        if number not in added_lines:
+            added_lines.add(number)
             async_add_entities([AsteriskLineStatus(coordinator, entry, number)])
 
     coordinator.set_line_status_entity_adder(add_line_status, restored)
@@ -91,17 +107,17 @@ class AsteriskPjsipRegistrations(CoordinatorEntity[AsteriskCoordinator], SensorE
 
 
 class AsteriskLineStatus(CoordinatorEntity[AsteriskCoordinator], SensorEntity):
-    """Per-line text sensor, created after the first observed call."""
+    """Per-line conversation sensor, created as soon as a registration is discovered."""
 
     _attr_has_entity_name = True
+    _attr_name = "Gespräch"
     _attr_icon = "mdi:phone"
 
     def __init__(self, coordinator: AsteriskCoordinator, entry: ConfigEntry, number: str) -> None:
         super().__init__(coordinator)
         self._number = number
-        self._attr_name = f"{number} Gespräch"
         self._attr_unique_id = f"{entry.entry_id}_line_{number}_status"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)}, name="Asterisk Line Monitor", manufacturer="Asterisk", model="AMI line monitor")
+        self._attr_device_info = _line_device_info(entry, number)
 
     @property
     def available(self) -> bool:
