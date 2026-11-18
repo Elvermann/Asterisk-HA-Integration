@@ -82,11 +82,12 @@ class AsteriskLineBusy(AsteriskBaseEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:
-        return bool(self.coordinator.data["lines"][self._number]["busy"])
+        details = self.coordinator.data.get("lines", {}).get(self._number, {})
+        return bool(details.get("busy"))
 
     @property
     def extra_state_attributes(self):
-        details = self.coordinator.data["lines"][self._number]
+        details = self.coordinator.data.get("lines", {}).get(self._number, {})
         if self.coordinator.show_call_details:
             return details
         return {"busy": details["busy"], "active_calls": details["active_calls"]}
