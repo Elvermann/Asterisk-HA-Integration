@@ -1,4 +1,4 @@
-# Asterisk Line Monitor 1.2.1
+# Asterisk Line Monitor 1.2.2-beta.1
 
 Home Assistant custom integration for monitoring Asterisk 23 / PJSIP over the read-only Asterisk Manager Interface (AMI).
 
