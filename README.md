@@ -1,17 +1,17 @@
-# Asterisk Line Monitor 1.2.2-beta.2
+# Asterisk Line Monitor 1.2.2-beta.4
 
-Home Assistant custom integration for monitoring Asterisk 23 / PJSIP over the read-only Asterisk Manager Interface (AMI).
-
-It monitors the epcan lines identified by the numbers **1820**, **9092255** and **9092256**, and discovers PJSIP client status from AMI events. Optional per-client conversation partner and call-duration sensors can be enabled in the integration options.
+Home Assistant custom integration for monitoring dynamically discovered Asterisk PJSIP provider lines and PJSIP clients over the Asterisk Manager Interface (AMI).
 
 ## Features
 
-- Three line-occupancy binary sensors named only `1820`, `9092255` and `9092256`.
-- AMI connection status and active epcan call count.
-- Dynamic PJSIP client status sensors (`online`, `offline`, `ringing`, `in call`, `dialing`, `unknown`).
-- Optional conversation partner and answered-call duration sensors per PJSIP client.
-- Read-only AMI operation; no AMI write permissions are required.
-- Keeps the external destination from `DialBegin.DialString` when Asterisk temporarily reports a dialplan feature string as `NewConnectedLine.ConnectedLineNum`.
+- Discovers the provider phone numbers dynamically from the AMI `PJSIPShowRegistrationsOutbound` response; no fixed number or line count is configured.
+- Creates one Home Assistant device per discovered provider number.
+- Each provider-line device has exactly two entities: **Gespräch** and **Registrierung**.
+- The conversation sensor is created immediately when the registration is discovered and initially reports `Frei`; during calls it reports the remote party when available.
+- The registration binary sensor reports whether at least one matching outbound registration is registered.
+- Retains the integration overview sensors for AMI connectivity, active provider calls and total PJSIP registrations.
+- Dynamically discovers PJSIP client status sensors and optional client conversation-detail sensors, excluding the provider endpoint `epcan`.
+- Read-only AMI event monitoring plus the registration-list action required for dynamic discovery.
 
 ## HACS installation
 
@@ -25,63 +25,25 @@ It monitors the epcan lines identified by the numbers **1820**, **9092255** and 
 
 Enter the Asterisk host, AMI port, AMI username and AMI password in the integration setup flow.
 
-Typical local setup:
+The AMI user needs permission to receive the required events and to execute the read-only `PJSIPShowRegistrationsOutbound` action. Restrict the AMI account with an ACL to the Home Assistant host and do not expose TCP 5038 to the internet. The action's permission class may require `reporting` in the AMI user's write permissions; do not grant broad `all` permissions.
 
-| Setting | Value |
-|---|---|
-| Asterisk host | `ASTERISK_LAN_IP` |
-| AMI port | `5038` |
-| AMI username | `ha_line_monitor` |
-| Home Assistant host allowed in `manager.conf` | `HOME_ASSISTANT_LAN_IP` |
+## Provider line entities
 
-The AMI user should be restricted to the Home Assistant source address and should have only the required read permissions. Do not expose TCP 5038 to the internet.
+The number of line devices is not fixed. Each distinct `ContactUser` found in the outbound registration snapshot is used as a provider-line device name. For each number, the integration creates:
 
-Example `manager.conf` user section:
+- **Gespräch** — initially `Frei`; during a call it shows the remote number when available. Additional call metadata is available as attributes.
+- **Registrierung** — connected when at least one registration for that number reports `Registered`.
 
-```ini
-[ha_line_monitor]
-secret = YOUR_LONG_RANDOM_PASSWORD
-deny = 0.0.0.0/0.0.0.0
-permit = HOME_ASSISTANT_LAN_IP/255.255.255.255
-read = system,call,dialplan
-write =
-```
+The old standalone occupancy entity named only after the phone number is no longer created. Legacy occupancy entities are removed from the entity registry during setup.
 
-## Line sensors
+## PJSIP client entities
 
-The three line sensors retain the display names:
-
-- `1820`
-- `9092255`
-- `9092256`
-
-For these binary sensors, `on` means occupied and `off` means free.
-
-## Optional call details
-
-Use **Settings → Devices & services → Asterisk Line Monitor → Configure** to enable or disable conversation partner and call-duration sensors.
-
-- Enabled: additional per-PJSIP-client sensors are created.
-- Disabled: those optional entities are removed from Home Assistant's entity registry.
-- Line sensors and basic client-status sensors remain available.
-
-Conversation duration starts when the call is answered, not while it is ringing.
+PJSIP client devices can expose a status sensor and, when enabled in the integration options, conversation-partner and answered-call-duration sensors. The provider endpoint `epcan` is not treated as a client device; its call information is shown on the corresponding provider-line device instead.
 
 ## Notes and limitations
 
-The integration is event-driven and does not issue AMI write actions or request a snapshot of active channels at startup. A call that was already in progress before Home Assistant connects or reconnects may not be discovered until new AMI events arrive. After an AMI reconnect, stale channel state is discarded.
-
-Conversation-partner association is based on AMI `DialBegin`, `NewConnectedLine`, `Newstate`, `DialEnd` and `Hangup` events. Transfers, queues and complex forwarding can result in changing peer information depending on the call flow.
+The integration is event-driven for calls and periodically reconciles the outbound registration list. Calls already in progress before an AMI connection or reconnection may not be fully reconstructed until new AMI events arrive. Complex transfers, queues and forwarding can affect remote-party identification depending on Asterisk's call flow.
 
 ## Development and releases
 
-The integration source is under `custom_components/asterisk_line_monitor/`.
-
-For each new release:
-
-1. Update the `version` in `custom_components/asterisk_line_monitor/manifest.json`.
-2. Add release notes to `CHANGELOG.md`.
-3. Commit and push the changes to the default branch.
-4. Create and publish a GitHub Release with a matching tag, for example `v1.3.0`.
-
-HACS can then offer the published release as an update.
+The integration source is under `custom_components/asterisk_line_monitor/`. Beta releases are published for validation before the stable version is tagged.
