@@ -1,4 +1,4 @@
-"""Binary sensors for the three epcan numbers and AMI connection."""
+"""Binary sensors for dynamically discovered provider lines and AMI."""
 
 from __future__ import annotations
 
@@ -8,15 +8,32 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, LINE_DEFINITIONS
+from .const import DOMAIN
 from .coordinator import AsteriskCoordinator
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities) -> None:
     coordinator: AsteriskCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities = [AsteriskAmiConnected(coordinator, entry)]
-    entities.extend(AsteriskLineBusy(coordinator, entry, number) for number in LINE_DEFINITIONS)
+    added_lines: set[str] = set()
+    for number in coordinator.line_numbers:
+        entities.extend(_line_entities(coordinator, entry, number))
+        added_lines.add(number)
     async_add_entities(entities)
+
+    def add_dynamic_line(number: str) -> None:
+        if number not in added_lines:
+            added_lines.add(number)
+            async_add_entities(_line_entities(coordinator, entry, number))
+
+    coordinator.set_line_entity_adder(add_dynamic_line)
+
+
+def _line_entities(coordinator: AsteriskCoordinator, entry: ConfigEntry, number: str):
+    return [
+        AsteriskLineBusy(coordinator, entry, number),
+        AsteriskLineRegistered(coordinator, entry, number),
+    ]
 
 
 class AsteriskBaseEntity(CoordinatorEntity[AsteriskCoordinator]):
@@ -73,3 +90,31 @@ class AsteriskLineBusy(AsteriskBaseEntity, BinarySensorEntity):
         if self.coordinator.show_call_details:
             return details
         return {"busy": details["busy"], "active_calls": details["active_calls"]}
+
+
+
+class AsteriskLineRegistered(AsteriskBaseEntity, BinarySensorEntity):
+    """Whether at least one outbound registration for a public line is registered."""
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_icon = "mdi:account-check"
+
+    def __init__(self, coordinator: AsteriskCoordinator, entry: ConfigEntry, number: str) -> None:
+        super().__init__(coordinator, entry)
+        self._number = number
+        self._attr_name = f"{number} Registrierung"
+        self._attr_unique_id = f"{entry.entry_id}_{number}_registered"
+
+    @property
+    def is_on(self) -> bool:
+        line = self.coordinator.data.get("lines", {}).get(self._number, {})
+        return bool(line.get("registered"))
+
+    @property
+    def extra_state_attributes(self):
+        line = self.coordinator.data.get("lines", {}).get(self._number, {})
+        return {
+            "rufnummer": self._number,
+            "registrierungsstatus": line.get("registration_status", "Unknown"),
+            "registrierungen": line.get("registrations", []),
+        }
