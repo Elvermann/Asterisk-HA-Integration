@@ -385,6 +385,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 updates["peer_name"] = connected_name
             if updates:
                 changed = self._update_client_channel(uniqueid, **updates)
+                changed = self._update_provider_channel(uniqueid, **updates) or changed
 
         elif name == "DialEnd":
             dial_status = event.get("DialStatus", "")
@@ -483,6 +484,28 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         dialed_number = _dialed_number(event)
 
+        # The line sensor reads its remote party from the provider-side channel.
+        if source_provider and source_uid:
+            provider_record = self._provider_channels[source_uid]
+            if dest_client is not None:
+                remote = _clean_number(event.get("CallerIDNum", ""))
+                if _is_usable_peer(remote):
+                    provider_record.update(peer=remote, peer_name=event.get("CallerIDName", ""), direction="inbound")
+            elif _is_usable_peer(dialed_number):
+                provider_record.update(peer=dialed_number, direction="outbound")
+            if provider_record.get("line"):
+                self._announce_line_status_entity(provider_record["line"])
+        if dest_provider and dest_uid:
+            provider_record = self._provider_channels[dest_uid]
+            if _is_usable_peer(dialed_number):
+                provider_record.update(peer=dialed_number, direction="outbound")
+            elif source_client is not None:
+                remote = _clean_number(event.get("CallerIDNum", ""))
+                if _is_usable_peer(remote):
+                    provider_record.update(peer=remote, direction="inbound")
+            if provider_record.get("line"):
+                self._announce_line_status_entity(provider_record["line"])
+
         if source_client is not None and source_uid:
             record = source_client["channels"][source_uid]
             if dest_client is not None:
@@ -506,6 +529,12 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 record.update(peer=source_endpoint, peer_name=KNOWN_CLIENTS.get(source_endpoint, f"PJSIP {source_endpoint}"), direction="intern")
             changed = True
         return changed
+
+    def _update_provider_channel(self, uniqueid: str, **updates: Any) -> bool:
+        if not uniqueid or uniqueid not in self._provider_channels:
+            return False
+        self._provider_channels[uniqueid].update({key: value for key, value in updates.items() if value is not None})
+        return True
 
     def _update_client_channel(self, uniqueid: str, **updates: Any) -> bool:
         if not uniqueid:
@@ -578,7 +607,9 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _snapshot(self) -> dict[str, Any]:
         now = asyncio.get_running_loop().time()
         lines: dict[str, dict[str, Any]] = {}
-        for number in self.line_numbers:
+        all_line_numbers = set(self.line_numbers)
+        all_line_numbers.update(record.get("line") for record in self._provider_channels.values() if record.get("line"))
+        for number in sorted(all_line_numbers):
             calls = [self._call_snapshot(record, now) for record in self._provider_channels.values() if record.get("line") == number]
             registrations = [item for item in self._registrations.values() if item["number"] == number]
             lines[number] = {
