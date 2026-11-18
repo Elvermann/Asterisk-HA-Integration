@@ -85,7 +85,7 @@ class AsteriskPjsipRegistrations(CoordinatorEntity[AsteriskCoordinator], SensorE
         return {"registrierungen": [
             {"objekt": item.get("object_name"), "rufnummer": item.get("number"),
              "endpoint": item.get("endpoint"), "status": item.get("status"),
-             "server_uri": item.get("server_uri"), "naechste_registrierung": _safe_int(item.get("next_reg"))}
+             "server_uri": item.get("server_uri"), "naechste_registrierung": item.get("next_reg")}
             for item in registrations.values()
         ]}
 
