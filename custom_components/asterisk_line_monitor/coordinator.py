@@ -257,6 +257,12 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             for item in self._registrations.values()
             if item.get("endpoint")
         }
+        for record in self._provider_channels.values():
+            endpoint = _endpoint_from_channel(record.get("channel", "") or "")
+            number = self._provider_endpoint_to_number.get(endpoint or "")
+            if number:
+                record["line"] = number
+                self._announce_line_status_entity(number)
         for number in self.line_numbers:
             self._announce_line_entity(number)
 
