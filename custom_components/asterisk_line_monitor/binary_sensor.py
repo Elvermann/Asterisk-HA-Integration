@@ -90,7 +90,7 @@ class AsteriskLineBusy(AsteriskBaseEntity, BinarySensorEntity):
         details = self.coordinator.data.get("lines", {}).get(self._number, {})
         if self.coordinator.show_call_details:
             return details
-        return {"busy": details["busy"], "active_calls": details["active_calls"]}
+        return {"busy": details.get("busy", False), "active_calls": details.get("active_calls", 0)}
 
 
 
