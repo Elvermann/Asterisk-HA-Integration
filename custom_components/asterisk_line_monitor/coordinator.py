@@ -160,7 +160,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._announced_line_status_entities.add(number)
             self._line_status_entity_adder(number)
 
-    def set_client_entity_adder(self, callback: Callable[[str], None]) -> None
+    def set_client_entity_adder(self, callback: Callable[[str], None]) -> None:
         self._client_entity_adder = callback
         for endpoint in self.client_endpoints:
             self._announce_client_entity(endpoint)
