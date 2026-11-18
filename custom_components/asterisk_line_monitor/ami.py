@@ -62,6 +62,15 @@ class AmiClient:
             except (ConnectionError, OSError):
                 pass
 
+    async def show_outbound_registrations(self) -> bool:
+        """Request a read-only snapshot of configured PJSIP outbound registrations."""
+        writer = self._writer
+        if writer is None or writer.is_closing():
+            return False
+        writer.write(_make_action(Action="PJSIPShowRegistrationsOutbound"))
+        await writer.drain()
+        return True
+
     async def run(self) -> None:
         backoff = 5
         while not self._stop.is_set():
@@ -139,4 +148,4 @@ class AmiClient:
             message = _parse_message(raw)
             if message.get("Event"):
                 await self.on_event(message)
-            # Ignore any asynchronous AMI responses. The integration sends no actions.
+            # Only read-only list queries are issued; action responses are intentionally ignored.
