@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.2-beta.4
+
+- Creates one Home Assistant device for every distinct provider number discovered from outbound PJSIP registrations; the number of lines is fully dynamic.
+- Creates exactly two entities per provider line: **Gespräch** and **Registrierung**.
+- Creates the conversation sensor as soon as the registration snapshot is applied; its initial state is `Frei`, without waiting for the first call.
+- Removes the redundant binary occupancy entity named only after the phone number.
+- Excludes the `epcan` provider endpoint from dynamic PJSIP client discovery and removes its obsolete client sensors/device.
+- Removes legacy occupancy entities from the entity registry during setup.
+- Keeps the integration overview sensors and non-provider PJSIP client monitoring.
+- Not yet validated against the live Asterisk/Home Assistant installation.
+
 ## 1.2.2-beta.2
 
 - Adds a central sensor for all outgoing PJSIP registrations and their status details.
@@ -29,7 +40,7 @@
 - Added an options-flow toggle to show or hide conversation-partner and call-duration sensors.
 - When the option is disabled, previously created optional conversation entities are removed from the Home Assistant entity registry.
 - Added per-PJSIP-client conversation partner and answered-call duration sensors.
-- Correlates source and destination channels from AMI `DialBegin`, with follow-up updates from `NewConnectedLine`, `Newstate`, `DialEnd`, and `Hangup`.
+- Correlates source and destination channels from AMI `DialBegin`, with follow-up updates from `NewConnectedLine`, `Newstate`, `DialEnd`, and `Hangup` events.
 - Shows peer number/name, call direction, epcan line and channel metadata in sensor attributes.
 - Added the MOBOTIX M26 endpoint 1003 to the known device labels.
 - Kept the existing three epcan line sensors named only `1820`, `9092255` and `9092256`.
