@@ -12,28 +12,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .ami import AmiClient, Message
-from .const import (
-    DOMAIN,
-    INBOUND_ENDPOINT,
-    KNOWN_CLIENTS,
-    LINE_DEFINITIONS,
-    PROVIDER_ENDPOINTS,
-)
+from .const import DOMAIN, INBOUND_ENDPOINT, KNOWN_CLIENTS
 
 _LOGGER = logging.getLogger(__name__)
 _CHANNEL_SUFFIX = re.compile(r"^[0-9A-Fa-f]+$")
-
-
-def _line_from_channel(channel: str) -> tuple[str | None, str | None]:
-    """Return (public phone number, direction) for provider channels."""
-    if not channel.startswith("PJSIP/"):
-        return None, None
-    for number, definition in LINE_DEFINITIONS.items():
-        if channel.startswith(f"PJSIP/{definition['endpoint']}-"):
-            return number, "outbound"
-    if channel.startswith(f"PJSIP/{INBOUND_ENDPOINT}-"):
-        return None, "inbound"
-    return None, None
 
 
 def _endpoint_from_channel(channel: str) -> str | None:
@@ -55,8 +37,10 @@ def _endpoint_from_device(device: str) -> str | None:
     return None
 
 
-def _is_provider_endpoint(endpoint: str) -> bool:
-    return endpoint == INBOUND_ENDPOINT or endpoint in PROVIDER_ENDPOINTS or endpoint.startswith("epcan-")
+def _endpoint_from_registration_name(object_name: str) -> str | None:
+    """Map epcan-reg-N registration objects to their epcan-N endpoint."""
+    match = re.fullmatch(r"epcan-reg-(\d+)", (object_name or "").strip())
+    return f"epcan-{match.group(1)}" if match else None
 
 
 def _clean_number(value: str) -> str:
@@ -100,8 +84,17 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._connected = False
         self._provider_channels: dict[str, dict[str, Any]] = {}
         self._clients: dict[str, dict[str, Any]] = {}
+        self._registrations: dict[str, dict[str, str]] = {}
+        self._registration_scan: dict[str, dict[str, str]] = {}
+        self._provider_endpoint_to_number: dict[str, str] = {}
+        self._line_entity_adder: Callable[[str], None] | None = None
+        self._announced_line_entities: set[str] = set()
+        self._line_status_entity_adder: Callable[[str], None] | None = None
+        self._announced_line_status_entities: set[str] = set()
         self._client_entity_adder: Callable[[str], None] | None = None
         self._announced_client_entities: set[str] = set()
+        self._registration_query_pending = False
+        self._registration_query_started = 0.0
         for endpoint in KNOWN_CLIENTS:
             self._ensure_client(endpoint)
         self._client = AmiClient(
@@ -114,6 +107,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._task: asyncio.Task | None = None
         self._timer_task: asyncio.Task | None = None
+        self._registration_task: asyncio.Task | None = None
         self.async_set_updated_data(self._snapshot())
 
     @property
@@ -121,8 +115,54 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return sorted(self._clients)
 
     @property
+    def line_numbers(self) -> list[str]:
+        return sorted({item["number"] for item in self._registrations.values()})
+
+    @property
     def show_call_details(self) -> bool:
         return bool(self._entry.options.get("show_call_details", True))
+
+    def set_line_entity_adder(self, callback: Callable[[str], None]) -> None:
+        self._line_entity_adder = callback
+        for record in self._provider_channels.values():
+            endpoint = _endpoint_from_channel(record.get("channel", "") or "")
+            number = self._provider_endpoint_to_number.get(endpoint or "")
+            if number:
+                record["line"] = number
+                self._announce_line_status_entity(number)
+        for number in self.line_numbers:
+            self._announce_line_entity(number)
+
+    def clear_line_entity_adder(self) -> None:
+        self._line_entity_adder = None
+        self._announced_line_entities.clear()
+
+    def _announce_line_entity(self, number: str) -> None:
+        if self._line_entity_adder and number not in self._announced_line_entities:
+            self._announced_line_entities.add(number)
+            self._line_entity_adder(number)
+
+    def set_line_status_entity_adder(self, callback: Callable[[str], None], existing_numbers: set[str] | None = None) -> None:
+        """Register the dynamic text-sensor adder and restore prior entities."""
+        self._line_status_entity_adder = callback
+        for number in existing_numbers or set():
+            self._announce_line_status_entity(number)
+        # Every currently registered provider line gets its conversation sensor
+        # immediately, even if no call has ever been observed for that line.
+        for number in self.line_numbers:
+            self._announce_line_status_entity(number)
+        for record in self._provider_channels.values():
+            if record.get("line"):
+                self._announce_line_status_entity(record["line"])
+
+    def clear_line_status_entity_adder(self) -> None:
+        self._line_status_entity_adder = None
+        self._announced_line_status_entities.clear()
+
+    def _announce_line_status_entity(self, number: str) -> None:
+        if self._line_status_entity_adder and number not in self._announced_line_status_entities:
+            self._announced_line_status_entities.add(number)
+            self._line_status_entity_adder(number)
 
     def set_client_entity_adder(self, callback: Callable[[str], None]) -> None:
         self._client_entity_adder = callback
@@ -140,7 +180,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _ensure_client(self, endpoint: str) -> dict[str, Any] | None:
         endpoint = endpoint.strip()
-        if not endpoint or _is_provider_endpoint(endpoint):
+        if not endpoint or self._is_provider_endpoint(endpoint):
             return None
         if endpoint not in self._clients:
             self._clients[endpoint] = {
@@ -157,10 +197,11 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_start(self) -> None:
         self._task = self.hass.async_create_task(self._client.run())
         self._timer_task = self.hass.async_create_task(self._refresh_durations())
+        self._registration_task = self.hass.async_create_task(self._refresh_registrations())
 
     async def async_stop(self) -> None:
         await self._client.stop()
-        tasks = [task for task in (self._task, self._timer_task) if task is not None]
+        tasks = [task for task in (self._task, self._timer_task, self._registration_task) if task is not None]
         for task in tasks:
             task.cancel()
         if tasks:
@@ -174,15 +215,84 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ):
                 self.async_set_updated_data(self._snapshot())
 
+    async def _refresh_registrations(self) -> None:
+        """Reconcile registration state periodically in case an AMI event was missed."""
+        while True:
+            await asyncio.sleep(30)
+            if self._connected:
+                now = asyncio.get_running_loop().time()
+                if self._registration_query_pending and now - self._registration_query_started > 20:
+                    self._registration_query_pending = False
+                if not self._registration_query_pending:
+                    await self._request_registration_snapshot()
+
+    async def _request_registration_snapshot(self) -> None:
+        if not self._connected or self._registration_query_pending:
+            return
+        self._registration_query_pending = True
+        self._registration_query_started = asyncio.get_running_loop().time()
+        self._registration_scan = {}
+        try:
+            sent = await self._client.show_outbound_registrations()
+            if not sent:
+                self._registration_query_pending = False
+        except (OSError, ConnectionError):
+            self._registration_query_pending = False
+            _LOGGER.debug("Could not request outbound PJSIP registrations", exc_info=True)
+
+    def _is_provider_endpoint(self, endpoint: str) -> bool:
+        normalized = endpoint.strip().lower()
+        return (
+            normalized == "epcan"
+            or normalized == INBOUND_ENDPOINT
+            or normalized.startswith("epcan-")
+            or endpoint in self._provider_endpoint_to_number
+        )
+
+    def _line_from_channel(self, channel: str) -> tuple[str | None, str | None]:
+        """Identify provider channels independently of registration-snapshot timing."""
+        endpoint = _endpoint_from_channel(channel)
+        if endpoint == INBOUND_ENDPOINT:
+            return None, "inbound"
+        if endpoint and endpoint.startswith("epcan-"):
+            return self._provider_endpoint_to_number.get(endpoint), "outbound"
+        number = self._provider_endpoint_to_number.get(endpoint or "")
+        return (number, "outbound") if number else (None, None)
+
+    def _apply_registration_snapshot(self) -> None:
+        """Commit one complete AMI registration list and announce newly found lines."""
+        self._registrations = dict(self._registration_scan)
+        self._provider_endpoint_to_number = {
+            item["endpoint"]: item["number"]
+            for item in self._registrations.values()
+            if item.get("endpoint")
+        }
+        for record in self._provider_channels.values():
+            endpoint = _endpoint_from_channel(record.get("channel", "") or "")
+            number = self._provider_endpoint_to_number.get(endpoint or "")
+            if number:
+                record["line"] = number
+                self._announce_line_status_entity(number)
+        for number in self.line_numbers:
+            self._announce_line_entity(number)
+            self._announce_line_status_entity(number)
+
     async def _handle_connection(self, connected: bool) -> None:
         self._connected = connected
         if not connected:
             self._provider_channels.clear()
+            self._registrations.clear()
+            self._registration_scan.clear()
+            self._provider_endpoint_to_number.clear()
+            self._registration_query_pending = False
             for client in self._clients.values():
                 client["channels"].clear()
                 client["contact_status"] = "Unknown"
                 client["device_state"] = "UNKNOWN"
                 client["roundtrip_usec"] = None
+        else:
+            self._registration_query_pending = False
+            await self._request_registration_snapshot()
         self.async_set_updated_data(self._snapshot())
 
     async def _handle_event(self, event: Message) -> None:
@@ -190,7 +300,31 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         uniqueid = event.get("Uniqueid", "")
         changed = False
 
-        if name == "ContactStatus":
+        if name == "OutboundRegistrationDetail":
+            object_name = event.get("ObjectName", "").strip()
+            number = _clean_number(event.get("ContactUser", ""))
+            if object_name and _is_usable_peer(number):
+                self._registration_scan[object_name] = {
+                    "object_name": object_name,
+                    "number": number,
+                    # Asterisk's Endpoint field is empty unless the registration
+                    # explicitly configures endpoint=. Our provider uses the
+                    # consistent epcan-reg-N -> epcan-N object naming convention.
+                    "endpoint": event.get("Endpoint", "").strip()
+                    or _endpoint_from_registration_name(object_name)
+                    or "",
+                    "status": event.get("Status", "Unknown").strip(),
+                    "server_uri": event.get("ServerUri", "").strip(),
+                    "client_uri": event.get("ClientUri", "").strip(),
+                    "next_reg": event.get("NextReg", "").strip(),
+                }
+
+        elif name == "OutboundRegistrationDetailComplete":
+            self._apply_registration_snapshot()
+            self._registration_query_pending = False
+            changed = True
+
+        elif name == "ContactStatus":
             endpoint = event.get("EndpointName", "")
             client = self._ensure_client(endpoint)
             if client is not None:
@@ -209,7 +343,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         elif name == "Newchannel":
             channel = event.get("Channel", "")
-            line, direction = _line_from_channel(channel)
+            line, direction = self._line_from_channel(channel)
             if direction:
                 key = uniqueid or channel
                 self._provider_channels[key] = self._new_channel_record(
@@ -219,6 +353,8 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     linkedid=event.get("Linkedid", ""),
                 )
                 self._apply_extension(self._provider_channels[key], event.get("Exten", ""), event.get("Context", ""))
+                if line:
+                    self._announce_line_status_entity(line)
                 changed = True
             else:
                 endpoint = _endpoint_from_channel(channel)
@@ -266,6 +402,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 updates["peer_name"] = connected_name
             if updates:
                 changed = self._update_client_channel(uniqueid, **updates)
+                changed = self._update_provider_channel(uniqueid, **updates) or changed
 
         elif name == "DialEnd":
             dial_status = event.get("DialStatus", "")
@@ -293,8 +430,8 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         dest_uid = event.get("DestUniqueid", "")
         source_endpoint = _endpoint_from_channel(source_channel)
         dest_endpoint = _endpoint_from_channel(dest_channel)
-        source_line, source_direction = _line_from_channel(source_channel)
-        dest_line, dest_direction = _line_from_channel(dest_channel)
+        source_line, source_direction = self._line_from_channel(source_channel)
+        dest_line, dest_direction = self._line_from_channel(dest_channel)
         source_provider = source_direction is not None
         dest_provider = dest_direction is not None
         changed = False
@@ -312,6 +449,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             if source_line:
                 record["line"] = source_line
+                self._announce_line_status_entity(source_line)
             changed = True
 
         if dest_provider and dest_uid:
@@ -327,6 +465,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             if dest_line:
                 record["line"] = dest_line
+                self._announce_line_status_entity(dest_line)
             changed = True
 
         source_client = self._ensure_client(source_endpoint or "") if source_endpoint and not source_provider else None
@@ -362,6 +501,28 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         dialed_number = _dialed_number(event)
 
+        # The line sensor reads its remote party from the provider-side channel.
+        if source_provider and source_uid:
+            provider_record = self._provider_channels[source_uid]
+            if dest_client is not None:
+                remote = _clean_number(event.get("CallerIDNum", ""))
+                if _is_usable_peer(remote):
+                    provider_record.update(peer=remote, peer_name=event.get("CallerIDName", ""), direction="inbound")
+            elif _is_usable_peer(dialed_number):
+                provider_record.update(peer=dialed_number, direction="outbound")
+            if provider_record.get("line"):
+                self._announce_line_status_entity(provider_record["line"])
+        if dest_provider and dest_uid:
+            provider_record = self._provider_channels[dest_uid]
+            if _is_usable_peer(dialed_number):
+                provider_record.update(peer=dialed_number, direction="outbound")
+            elif source_client is not None:
+                remote = _clean_number(event.get("CallerIDNum", ""))
+                if _is_usable_peer(remote):
+                    provider_record.update(peer=remote, direction="inbound")
+            if provider_record.get("line"):
+                self._announce_line_status_entity(provider_record["line"])
+
         if source_client is not None and source_uid:
             record = source_client["channels"][source_uid]
             if dest_client is not None:
@@ -385,6 +546,12 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 record.update(peer=source_endpoint, peer_name=KNOWN_CLIENTS.get(source_endpoint, f"PJSIP {source_endpoint}"), direction="intern")
             changed = True
         return changed
+
+    def _update_provider_channel(self, uniqueid: str, **updates: Any) -> bool:
+        if not uniqueid or uniqueid not in self._provider_channels:
+            return False
+        self._provider_channels[uniqueid].update({key: value for key, value in updates.items() if value is not None})
+        return True
 
     def _update_client_channel(self, uniqueid: str, **updates: Any) -> bool:
         if not uniqueid:
@@ -413,12 +580,12 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "answered_monotonic": asyncio.get_running_loop().time() if str(state).lower() == "up" else None,
         }
 
-    @staticmethod
-    def _apply_extension(record: dict[str, Any], extension: str, context: str) -> None:
+    def _apply_extension(self, record: dict[str, Any], extension: str, context: str) -> None:
         if context == "from-epcan" and extension:
             record["extension"] = extension
-            if extension in LINE_DEFINITIONS:
+            if extension in self.line_numbers:
                 record["line"] = extension
+                self._announce_line_status_entity(extension)
             record["direction"] = "inbound"
 
     @staticmethod
@@ -458,9 +625,24 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _snapshot(self) -> dict[str, Any]:
         now = asyncio.get_running_loop().time()
         lines: dict[str, dict[str, Any]] = {}
-        for number in LINE_DEFINITIONS:
+        all_line_numbers = set(self.line_numbers)
+        all_line_numbers.update(record.get("line") for record in self._provider_channels.values() if record.get("line"))
+        for number in sorted(all_line_numbers):
             calls = [self._call_snapshot(record, now) for record in self._provider_channels.values() if record.get("line") == number]
-            lines[number] = {"busy": bool(calls), "active_calls": len(calls), "calls": calls}
+            registrations = [item for item in self._registrations.values() if item["number"] == number]
+            lines[number] = {
+                "busy": bool(calls),
+                "active_calls": len(calls),
+                "calls": calls,
+                "registered": any(item.get("status", "").lower() == "registered" for item in registrations),
+                "registration_status": ", ".join(sorted({item.get("status", "Unknown") for item in registrations})) or "Unknown",
+                "registrations": [
+                    {"object_name": item["object_name"], "endpoint": item.get("endpoint") or None,
+                     "status": item.get("status", "Unknown"), "server_uri": item.get("server_uri") or None,
+                     "next_reg": _safe_int(item.get("next_reg"))}
+                    for item in registrations
+                ],
+            }
         all_calls = [{"uniqueid": uniqueid, **self._call_snapshot(record, now)} for uniqueid, record in self._provider_channels.items()]
         clients: dict[str, dict[str, Any]] = {}
         for endpoint, client in self._clients.items():
@@ -476,7 +658,14 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "channels": channels,
                 "current_call": self._current_call(client, now),
             }
-        return {"connected": self._connected, "active_calls": len(self._provider_channels), "lines": lines, "calls": all_calls, "clients": clients}
+        return {
+            "connected": self._connected,
+            "active_calls": len(self._provider_channels),
+            "lines": lines,
+            "registrations": self._registrations,
+            "calls": all_calls,
+            "clients": clients,
+        }
 
     @staticmethod
     def _call_snapshot(record: dict[str, Any], now: float) -> dict[str, Any]:

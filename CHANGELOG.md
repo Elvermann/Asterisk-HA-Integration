@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.2.2
+
+- Dynamically discovers any number of outbound PJSIP provider registrations; no fixed line list or line count is required.
+- Creates one Home Assistant device per distinct provider number, with exactly two entities: **Gespräch** and **Registrierung**.
+- Creates the conversation sensor as soon as the registration is discovered; it initially reports `Frei` without waiting for the first call.
+- Displays the remote party on the matching provider-line conversation sensor during calls.
+- Removes the redundant standalone occupancy entity named only after the phone number.
+- Excludes the `epcan` provider endpoint from PJSIP client discovery and removes its obsolete client sensors/device.
+- Cleans up legacy occupancy entities during integration setup.
+- Updates the README with dynamic line discovery, entity layout and AMI permission requirements.
+
+## 1.2.2-beta.4
+
+- Creates one Home Assistant device for every distinct provider number discovered from outbound PJSIP registrations; the number of lines is fully dynamic.
+- Creates exactly two entities per provider line: **Gespräch** and **Registrierung**.
+- Creates the conversation sensor as soon as the registration snapshot is applied; its initial state is `Frei`, without waiting for the first call.
+- Removes the redundant binary occupancy entity named only after the phone number.
+- Excludes the `epcan` provider endpoint from dynamic PJSIP client discovery and removes its obsolete client sensors/device.
+- Removes legacy occupancy entities from the entity registry during setup.
+- Keeps the integration overview sensors and non-provider PJSIP client monitoring.
+- Not yet validated against the live Asterisk/Home Assistant installation.
+
+## 1.2.2-beta.2
+
+- Adds a central sensor for all outgoing PJSIP registrations and their status details.
+- Detects epcan provider call legs even when the registration snapshot has not yet arrived; epcan-in remains separate.
+- Adds a per-line conversation sensor after the first detected call; it shows the remote number during a call and Frei after hangup.
+- Tracks remote-party information on the provider-side channel and restores previously registered line sensors after Home Assistant restarts.
+- Keeps AMI operations read-only.
+- Not yet validated against the live Asterisk/Home Assistant installation.
+
+## 1.2.2-beta.1
+
+- Beta: dynamically discovers outgoing PJSIP provider registrations through the read-only AMI action `PJSIPShowRegistrationsOutbound`.
+- Maps registration objects named `epcan-reg-N` to their corresponding `epcan-N` endpoints and uses the AMI `ContactUser` value to identify provider line numbers.
+- Keeps the inbound-only `epcan-in` endpoint separate from the three outgoing provider lines.
+- Adds dynamic registration status entities and reconciles provider line entities as registration data changes.
+- Preserves the existing provider line sensor behavior and read-only AMI operation.
+- This beta has not yet been validated against the user's live Asterisk/Home Assistant setup.
+
 ## 1.2.1
 
 - Fixed remote-party sensor being overwritten by Asterisk dialplan strings such as `*810...` in `NewConnectedLine.ConnectedLineNum`.
@@ -11,7 +51,7 @@
 - Added an options-flow toggle to show or hide conversation-partner and call-duration sensors.
 - When the option is disabled, previously created optional conversation entities are removed from the Home Assistant entity registry.
 - Added per-PJSIP-client conversation partner and answered-call duration sensors.
-- Correlates source and destination channels from AMI `DialBegin`, with follow-up updates from `NewConnectedLine`, `Newstate`, `DialEnd`, and `Hangup`.
+- Correlates source and destination channels from AMI `DialBegin`, with follow-up updates from `NewConnectedLine`, `Newstate`, `DialEnd`, and `Hangup` events.
 - Shows peer number/name, call direction, epcan line and channel metadata in sensor attributes.
 - Added the MOBOTIX M26 endpoint 1003 to the known device labels.
 - Kept the existing three epcan line sensors named only `1820`, `9092255` and `9092256`.
