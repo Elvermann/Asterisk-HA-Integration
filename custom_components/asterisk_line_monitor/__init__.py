@@ -34,6 +34,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload the integration."""
     coordinator: AsteriskCoordinator = hass.data[DOMAIN][entry.entry_id]
     coordinator.clear_client_entity_adder()
+    coordinator.clear_line_entity_adder()
     unload_ok = await hass.config_entries.async_unload_platforms(entry, ["binary_sensor", "sensor"])
     await coordinator.async_stop()
     hass.data[DOMAIN].pop(entry.entry_id)
