@@ -214,10 +214,12 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return endpoint == INBOUND_ENDPOINT or endpoint.startswith("epcan-") or endpoint in self._provider_endpoint_to_number
 
     def _line_from_channel(self, channel: str) -> tuple[str | None, str | None]:
-        """Resolve provider channels using Endpoint from outbound registration details."""
+        """Identify provider channels independently of registration-snapshot timing."""
         endpoint = _endpoint_from_channel(channel)
         if endpoint == INBOUND_ENDPOINT:
             return None, "inbound"
+        if endpoint and endpoint.startswith("epcan-"):
+            return self._provider_endpoint_to_number.get(endpoint), "outbound"
         number = self._provider_endpoint_to_number.get(endpoint or "")
         return (number, "outbound") if number else (None, None)
 
