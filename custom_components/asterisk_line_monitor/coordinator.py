@@ -39,7 +39,7 @@ def _endpoint_from_device(device: str) -> str | None:
 
 def _endpoint_from_registration_name(object_name: str) -> str | None:
     """Map epcan-reg-N registration objects to their epcan-N endpoint."""
-    match = re.fullmatch(r"epcan-reg-(\\d+)", (object_name or "").strip())
+    match = re.fullmatch(r"epcan-reg-(\d+)", (object_name or "").strip())
     return f"epcan-{match.group(1)}" if match else None
 
 
