@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.2-beta.1
+
+- Beta: dynamically discovers outgoing PJSIP provider registrations through the read-only AMI action `PJSIPShowRegistrationsOutbound`.
+- Maps registration objects named `epcan-reg-N` to their corresponding `epcan-N` endpoints and uses the AMI `ContactUser` value to identify provider line numbers.
+- Keeps the inbound-only `epcan-in` endpoint separate from the three outgoing provider lines.
+- Adds dynamic registration status entities and reconciles provider line entities as registration data changes.
+- Preserves the existing provider line sensor behavior and read-only AMI operation.
+- This beta has not yet been validated against the user's live Asterisk/Home Assistant setup.
+
 ## 1.2.1
 
 - Fixed remote-party sensor being overwritten by Asterisk dialplan strings such as `*810...` in `NewConnectedLine.ConnectedLineNum`.
