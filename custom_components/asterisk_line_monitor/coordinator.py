@@ -194,6 +194,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self._registration_query_pending = True
         self._registration_query_started = asyncio.get_running_loop().time()
+        self._registration_scan = {}
         try:
             sent = await self._client.show_outbound_registrations()
             if not sent:
@@ -203,7 +204,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.debug("Could not request outbound PJSIP registrations", exc_info=True)
 
     def _is_provider_endpoint(self, endpoint: str) -> bool:
-        return endpoint == INBOUND_ENDPOINT or endpoint in self._provider_endpoint_to_number
+        return endpoint == INBOUND_ENDPOINT or endpoint.startswith("epcan-") or endpoint in self._provider_endpoint_to_number
 
     def _line_from_channel(self, channel: str) -> tuple[str | None, str | None]:
         """Resolve provider channels using Endpoint from outbound registration details."""
