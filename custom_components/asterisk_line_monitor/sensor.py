@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_SHOW_CALL_DETAILS, DOMAIN, KNOWN_CLIENTS
@@ -25,7 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     """Set up fixed and dynamically discovered client sensors."""
     coordinator: AsteriskCoordinator = hass.data[DOMAIN][entry.entry_id]
     added_clients: set[str] = set()
-    entities: list[SensorEntity] = [AsteriskActiveCalls(coordinator, entry)]
+    entities: list[SensorEntity] = [AsteriskActiveCalls(coordinator, entry), AsteriskPjsipRegistrations(coordinator, entry)]
     for endpoint in coordinator.client_endpoints:
         entities.extend(_client_entities(coordinator, entry, endpoint))
         added_clients.add(endpoint)
@@ -37,6 +38,99 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             async_add_entities(_client_entities(coordinator, entry, endpoint))
 
     coordinator.set_client_entity_adder(add_dynamic_client)
+
+    registry = er.async_get(hass)
+    prefix = f"{entry.entry_id}_line_"
+    restored = {
+        entity.unique_id[len(prefix):]
+        for entity in registry.entities.values()
+        if entity.config_entry_id == entry.entry_id
+        and entity.domain == "sensor"
+        and entity.unique_id.startswith(prefix)
+        and entity.unique_id.endswith("_status")
+    }
+    added_status: set[str] = set()
+
+    def add_line_status(number: str) -> None:
+        if number not in added_status:
+            added_status.add(number)
+            async_add_entities([AsteriskLineStatus(coordinator, entry, number)])
+
+    coordinator.set_line_status_entity_adder(add_line_status, restored)
+
+
+class AsteriskPjsipRegistrations(CoordinatorEntity[AsteriskCoordinator], SensorEntity):
+    """Central overview of outgoing PJSIP registrations."""
+
+    _attr_has_entity_name = True
+    _attr_name = "PJSIP Registrierungen"
+    _attr_icon = "mdi:account-network"
+
+    def __init__(self, coordinator: AsteriskCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_pjsip_registrations"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)}, name="Asterisk Line Monitor", manufacturer="Asterisk", model="AMI line monitor")
+
+    @property
+    def available(self) -> bool:
+        return bool(self.coordinator.data and self.coordinator.data.get("connected"))
+
+    @property
+    def native_value(self) -> int:
+        return len(self.coordinator.data.get("registrations", {}))
+
+    @property
+    def extra_state_attributes(self):
+        registrations = self.coordinator.data.get("registrations", {})
+        return {"registrierungen": [
+            {"objekt": item.get("object_name"), "rufnummer": item.get("number"),
+             "endpoint": item.get("endpoint"), "status": item.get("status"),
+             "server_uri": item.get("server_uri"), "naechste_registrierung": _safe_int(item.get("next_reg"))}
+            for item in registrations.values()
+        ]}
+
+
+class AsteriskLineStatus(CoordinatorEntity[AsteriskCoordinator], SensorEntity):
+    """Per-line text sensor, created after the first observed call."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:phone"
+
+    def __init__(self, coordinator: AsteriskCoordinator, entry: ConfigEntry, number: str) -> None:
+        super().__init__(coordinator)
+        self._number = number
+        self._attr_name = f"{number} Gespräch"
+        self._attr_unique_id = f"{entry.entry_id}_line_{number}_status"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry.entry_id)}, name="Asterisk Line Monitor", manufacturer="Asterisk", model="AMI line monitor")
+
+    @property
+    def available(self) -> bool:
+        return bool(self.coordinator.data and self.coordinator.data.get("connected"))
+
+    @property
+    def line(self) -> dict:
+        return self.coordinator.data.get("lines", {}).get(self._number, {})
+
+    @property
+    def current_call(self) -> dict:
+        calls = self.line.get("calls", [])
+        return max(calls, key=lambda call: call.get("setup_duration", 0)) if calls else {}
+
+    @property
+    def native_value(self) -> str:
+        call = self.current_call
+        if not call:
+            return "Frei"
+        peer = str(call.get("peer") or "").strip()
+        return peer if peer and peer.lower() not in {"unbekannt", "unknown"} else "Belegt"
+
+    @property
+    def extra_state_attributes(self):
+        call = self.current_call
+        return {"rufnummer": self._number, "gegenstelle": call.get("peer"),
+                "gegenstellenname": call.get("peer_name"), "richtung": call.get("direction"),
+                "gespraechsdauer": call.get("duration", 0),
+                "registrierungsstatus": self.line.get("registration_status", "Unknown")}
 
 
 class AsteriskActiveCalls(CoordinatorEntity[AsteriskCoordinator], SensorEntity):
