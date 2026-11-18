@@ -60,7 +60,7 @@ manager reload
 
 ## Provider line devices and entities
 
-The number of provider-line devices is determined by the registrations returned by Asterisk. Each distinct `ContactUser` found in the outbound registration snapshot becomes a device name. For example, if Asterisk reports `1820`, `9092255` and `9092256`, Home Assistant creates three devices with two entities each.
+The number of provider-line devices is determined dynamically by the outbound PJSIP registrations returned by Asterisk. For every distinct `ContactUser` found in the registration snapshot, Home Assistant creates one device with exactly two entities. No phone numbers or provider-line counts are predefined or hard-coded; newly discovered registrations are added automatically.
 
 The entity set is not limited to these example numbers. Additional registrations are discovered automatically.
 
