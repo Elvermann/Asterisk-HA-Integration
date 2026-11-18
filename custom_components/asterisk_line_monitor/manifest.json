@@ -1,7 +1,7 @@
 {
   "domain": "asterisk_line_monitor",
   "name": "Asterisk Line Monitor",
-  "version": "1.2.2-beta.1",
+  "version": "1.2.2-beta.2",
   "documentation": "https://github.com/Elvermann/Asterisk-HA-Integration#readme",
   "codeowners": [
     "@Elvermann"
