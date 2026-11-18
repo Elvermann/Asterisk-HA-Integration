@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.2-beta.2
+
+- Adds a central sensor for all outgoing PJSIP registrations and their status details.
+- Detects epcan provider call legs even when the registration snapshot has not yet arrived; epcan-in remains separate.
+- Adds a per-line conversation sensor after the first detected call; it shows the remote number during a call and Frei after hangup.
+- Tracks remote-party information on the provider-side channel and restores previously registered line sensors after Home Assistant restarts.
+- Keeps AMI operations read-only.
+- Not yet validated against the live Asterisk/Home Assistant installation.
+
 ## 1.2.2-beta.1
 
 - Beta: dynamically discovers outgoing PJSIP provider registrations through the read-only AMI action `PJSIPShowRegistrationsOutbound`.
