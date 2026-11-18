@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.2
+
+- Dynamically discovers any number of outbound PJSIP provider registrations; no fixed line list or line count is required.
+- Creates one Home Assistant device per distinct provider number, with exactly two entities: **Gespräch** and **Registrierung**.
+- Creates the conversation sensor as soon as the registration is discovered; it initially reports `Frei` without waiting for the first call.
+- Displays the remote party on the matching provider-line conversation sensor during calls.
+- Removes the redundant standalone occupancy entity named only after the phone number.
+- Excludes the `epcan` provider endpoint from PJSIP client discovery and removes its obsolete client sensors/device.
+- Cleans up legacy occupancy entities during integration setup.
+- Updates the README with dynamic line discovery, entity layout and AMI permission requirements.
+
 ## 1.2.2-beta.4
 
 - Creates one Home Assistant device for every distinct provider number discovered from outbound PJSIP registrations; the number of lines is fully dynamic.
