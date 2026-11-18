@@ -37,6 +37,12 @@ def _endpoint_from_device(device: str) -> str | None:
     return None
 
 
+def _endpoint_from_registration_name(object_name: str) -> str | None:
+    """Map epcan-reg-N registration objects to their epcan-N endpoint."""
+    match = re.fullmatch(r"epcan-reg-(\\d+)", (object_name or "").strip())
+    return f"epcan-{match.group(1)}" if match else None
+
+
 def _clean_number(value: str) -> str:
     """Remove common PJSIP dial-string decoration but preserve phone symbols."""
     value = (value or "").strip().strip('"<>')
@@ -99,6 +105,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._task: asyncio.Task | None = None
         self._timer_task: asyncio.Task | None = None
+        self._registration_task: asyncio.Task | None = None
         self.async_set_updated_data(self._snapshot())
 
     @property
@@ -255,7 +262,12 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._registration_scan[object_name] = {
                     "object_name": object_name,
                     "number": number,
-                    "endpoint": event.get("Endpoint", "").strip(),
+                    # Asterisk's Endpoint field is empty unless the registration
+                    # explicitly configures endpoint=. Our provider uses the
+                    # consistent epcan-reg-N -> epcan-N object naming convention.
+                    "endpoint": event.get("Endpoint", "").strip()
+                    or _endpoint_from_registration_name(object_name)
+                    or "",
                     "status": event.get("Status", "Unknown").strip(),
                     "server_uri": event.get("ServerUri", "").strip(),
                     "client_uri": event.get("ClientUri", "").strip(),
