@@ -89,6 +89,8 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._provider_endpoint_to_number: dict[str, str] = {}
         self._line_entity_adder: Callable[[str], None] | None = None
         self._announced_line_entities: set[str] = set()
+        self._line_status_entity_adder: Callable[[str], None] | None = None
+        self._announced_line_status_entities: set[str] = set()
         self._client_entity_adder: Callable[[str], None] | None = None
         self._announced_client_entities: set[str] = set()
         self._registration_query_pending = False
@@ -122,6 +124,12 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def set_line_entity_adder(self, callback: Callable[[str], None]) -> None:
         self._line_entity_adder = callback
+        for record in self._provider_channels.values():
+            endpoint = _endpoint_from_channel(record.get("channel", "") or "")
+            number = self._provider_endpoint_to_number.get(endpoint or "")
+            if number:
+                record["line"] = number
+                self._announce_line_status_entity(number)
         for number in self.line_numbers:
             self._announce_line_entity(number)
 
@@ -134,7 +142,25 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._announced_line_entities.add(number)
             self._line_entity_adder(number)
 
-    def set_client_entity_adder(self, callback: Callable[[str], None]) -> None:
+    def set_line_status_entity_adder(self, callback: Callable[[str], None], existing_numbers: set[str] | None = None) -> None:
+        """Register the dynamic text-sensor adder and restore prior entities."""
+        self._line_status_entity_adder = callback
+        for number in existing_numbers or set():
+            self._announce_line_status_entity(number)
+        for record in self._provider_channels.values():
+            if record.get("line"):
+                self._announce_line_status_entity(record["line"])
+
+    def clear_line_status_entity_adder(self) -> None:
+        self._line_status_entity_adder = None
+        self._announced_line_status_entities.clear()
+
+    def _announce_line_status_entity(self, number: str) -> None:
+        if self._line_status_entity_adder and number not in self._announced_line_status_entities:
+            self._announced_line_status_entities.add(number)
+            self._line_status_entity_adder(number)
+
+    def set_client_entity_adder(self, callback: Callable[[str], None]) -> None
         self._client_entity_adder = callback
         for endpoint in self.client_endpoints:
             self._announce_client_entity(endpoint)
@@ -310,6 +336,8 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     linkedid=event.get("Linkedid", ""),
                 )
                 self._apply_extension(self._provider_channels[key], event.get("Exten", ""), event.get("Context", ""))
+                if line:
+                    self._announce_line_status_entity(line)
                 changed = True
             else:
                 endpoint = _endpoint_from_channel(channel)
@@ -403,6 +431,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             if source_line:
                 record["line"] = source_line
+                self._announce_line_status_entity(source_line)
             changed = True
 
         if dest_provider and dest_uid:
@@ -418,6 +447,7 @@ class AsteriskCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             if dest_line:
                 record["line"] = dest_line
+                self._announce_line_status_entity(dest_line)
             changed = True
 
         source_client = self._ensure_client(source_endpoint or "") if source_endpoint and not source_provider else None
